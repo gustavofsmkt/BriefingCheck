@@ -1,5 +1,5 @@
 ---
-applyTo: "{src/lib/n8n/**,src/app/api/analyze/**}"
+applyTo: "src/lib/n8n/**"
 ---
 # n8n AI Agent Integration
 - A comunicação com n8n é via Webhooks POST.

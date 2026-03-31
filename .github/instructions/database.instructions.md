@@ -1,5 +1,5 @@
 ---
-applyTo: "{src/lib/supabase/**,src/hooks/useSupabase.ts,database.types.ts}"
+applyTo: "src/lib/supabase/**"
 ---
 # Supabase & Database Rules
 - SEMPRE use RLS (Row Level Security) em todas as tabelas.

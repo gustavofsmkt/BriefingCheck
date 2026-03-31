@@ -1,5 +1,5 @@
 ---
-applyTo: "{src/components/**,src/app/**/*.tsx}"
+applyTo: "src/components/**"
 ---
 # UI & Tailwind Rules
 - Design System: Moderno, Minimalista, Dark Mode por padrão.
