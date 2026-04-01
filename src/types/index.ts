@@ -8,11 +8,8 @@ export interface Briefing {
 }
 
 export interface AnalysisResult {
-  id: string;
-  briefing_id: string;
-  positive_points: string[];
-  negative_points: string[];
-  missing_elements: string[];
-  overall_score: number;
-  raw_analysis?: any;
+  alinhamento: { score: number; label: string };
+  pontos_positivos: string[];
+  pontos_de_melhoria: string[];
+  faltou_no_criativo: string[];
 }

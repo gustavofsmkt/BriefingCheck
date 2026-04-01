@@ -1,105 +1,295 @@
 "use client";
 
-import { useState } from "react";
-import { Upload, FileText, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { RotateCcw, Sparkles, Zap } from "lucide-react";
+import { supabase } from "@/lib/supabase/client";
+import { triggerN8nWebhook } from "@/lib/n8n/webhook";
+import { AnalysisResult } from "@/types";
+import { UploadDropzone } from "@/components/analysis/UploadDropzone";
+import { BriefingInput } from "@/components/analysis/BriefingInput";
+import { AnalysisLoadingState } from "@/components/analysis/AnalysisLoadingState";
+import { AnalysisResultsPanel } from "@/components/analysis/AnalysisResultsPanel";
+import { ToastMessage, ToastVariant } from "@/components/ui/ToastMessage";
+
+interface ToastState {
+  title: string;
+  description?: string;
+  variant: ToastVariant;
+}
 
 export function AnalysisForm() {
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [briefingText, setBriefingText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [loadingStepIndex, setLoadingStepIndex] = useState(0);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
-  const handleImageDrop = (e: React.DragEvent<HTMLLabelElement>) => {
-    e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setImageFile(e.dataTransfer.files[0]);
+  const isSubmitDisabled = isLoading || !imageFile || briefingText.trim().length < 20;
+
+  const loadingSteps = useMemo(
+    () => [
+      "Enviando criativo para processamento...",
+      "Registrando briefing e preparando o fluxo...",
+      "IA analisando estrutura visual e contexto...",
+      "Consolidando insights e score final...",
+    ],
+    []
+  );
+
+  useEffect(() => {
+    if (!isLoading) {
+      setLoadingStepIndex(0);
+      return;
     }
+
+    const stepTimer = setInterval(() => {
+      setLoadingStepIndex((prev) => (prev < loadingSteps.length - 1 ? prev + 1 : prev));
+    }, 2400);
+
+    return () => clearInterval(stepTimer);
+  }, [isLoading, loadingSteps.length]);
+
+  useEffect(() => {
+    if (!toast) {
+      return;
+    }
+
+    const timeout = setTimeout(() => setToast(null), 4500);
+    return () => clearTimeout(timeout);
+  }, [toast]);
+
+  useEffect(() => {
+    return () => {
+      if (imagePreview) {
+        URL.revokeObjectURL(imagePreview);
+      }
+    };
+  }, [imagePreview]);
+
+  const handleFileSelect = (file: File) => {
+    setImageFile(file);
+    setResult(null);
+    setToast(null);
+
+    if (imagePreview) {
+      URL.revokeObjectURL(imagePreview);
+    }
+
+    setImagePreview(URL.createObjectURL(file));
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setImageFile(e.target.files[0]);
+  const handleClearFile = () => {
+    setImageFile(null);
+
+    if (imagePreview) {
+      URL.revokeObjectURL(imagePreview);
     }
+
+    setImagePreview(null);
+  };
+
+  const handleResetFlow = () => {
+    setResult(null);
+    setToast(null);
+    setBriefingText("");
+    handleClearFile();
+  };
+
+  const showErrorToast = (description: string) => {
+    setToast({
+      title: "Nao foi possivel concluir a analise",
+      description,
+      variant: "error",
+    });
+  };
+
+  const showSuccessToast = () => {
+    setToast({
+      title: "Analise finalizada com sucesso",
+      description: "Os resultados ja estao disponiveis na tela.",
+      variant: "success",
+    });
   };
 
   const handleSubmit = async () => {
-    if (!imageFile || !briefingText) {
-      setError("Por favor, adicione uma imagem e o texto do briefing.");
+    if (!imageFile || !briefingText.trim()) {
+      showErrorToast("Adicione uma imagem e preencha o briefing antes de analisar.");
+      return;
+    }
+
+    if (briefingText.trim().length < 20) {
+      showErrorToast("O briefing precisa ter pelo menos 20 caracteres para uma analise confiavel.");
+      return;
+    }
+
+    if (imageFile.size > 5 * 1024 * 1024) {
+      showErrorToast("A imagem ultrapassa 5MB. Use um arquivo menor para continuar.");
       return;
     }
 
     try {
       setIsLoading(true);
-      setError(null);
+      setToast(null);
+      setResult(null);
       
-      // TODO: Upload image to Supabase Storage -> Get URL
-      // TODO: Call triggerN8nWebhook with imageUrl and briefingText
+      const fileName = `${Date.now()}-${imageFile.name}`;
       
-      // Simulating API call
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('creatives')
+        .upload(fileName, imageFile);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('creatives')
+        .getPublicUrl(uploadData.path);
+
+      // Fazer um INSERT na tabela analyses do Supabase
+      const { data: analysisData, error: dbError } = await supabase
+        .from('analyses')
+        .insert([{ 
+          image_url: publicUrl, 
+          briefing_text: briefingText, 
+          status: 'pending' 
+        }])
+        .select('id')
+        .single();
+
+      if (dbError) {
+        console.error("Insert error:", dbError);
+        throw dbError;
+      }
+
+      await triggerN8nWebhook({
+        id: analysisData.id,
+        image_url: publicUrl,
+        briefing_text: briefingText,
+      });
+
+      const pollInterval = setInterval(async () => {
+        const { data: pollData, error: pollError } = await supabase
+          .from('analyses')
+          .select('status, analysis_result')
+          .eq('id', analysisData.id)
+          .single();
+
+        if (pollError) {
+          console.error("Polling erro:", pollError);
+          clearInterval(pollInterval);
+          showErrorToast(`Erro ao verificar o status da analise: ${pollError.message}`);
+          setIsLoading(false);
+          return;
+        }
+
+        if (pollData.status === 'completed') {
+          clearInterval(pollInterval);
+          setResult(pollData.analysis_result as AnalysisResult);
+          showSuccessToast();
+          setIsLoading(false);
+        } else if (pollData.status === 'failed') {
+          clearInterval(pollInterval);
+          showErrorToast("A analise falhou no fluxo do n8n.");
+          setIsLoading(false);
+        }
+      }, 3000);
+
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido ao analisar.");
-    } finally {
+      showErrorToast(err instanceof Error ? err.message : "Erro desconhecido ao analisar.");
       setIsLoading(false);
     }
   };
 
   return (
-    <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 mb-16 w-full">
-      {/* Upload Zone */}
-      <div className="lg:col-span-5 bg-zinc-900/50 rounded-2xl p-8 border border-zinc-800 shadow-sm transition-shadow">
-        <label 
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleImageDrop}
-          className="h-full flex flex-col justify-center items-center border-2 border-dashed border-zinc-700 rounded-xl p-10 bg-zinc-950/50 hover:bg-zinc-800/50 transition-colors group cursor-pointer relative"
-        >
-          <input 
-            type="file" 
-            accept="image/png, image/jpeg, video/mp4" 
-            className="hidden" 
-            onChange={handleFileChange}
-          />
-          <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-             <Upload className="text-blue-500 w-8 h-8" />
-          </div>
-          <p className="text-white font-semibold mb-2">
-            {imageFile ? imageFile.name : "Arraste o arquivo aqui"}
-          </p>
-          <p className="text-zinc-500 text-sm mb-6">Suporte para PNG, JPG</p>
-          <span className="bg-zinc-800 text-white px-6 py-2 rounded-lg font-medium hover:bg-zinc-700 transition-colors">
-            Procurar arquivo
-          </span>
-        </label>
-      </div>
-
-      {/* Briefing Textarea */}
-      <div className="lg:col-span-7 bg-zinc-900/50 rounded-2xl p-8 border border-zinc-800 shadow-sm flex flex-col">
-        <label className="block text-white font-bold text-lg mb-4 flex items-center gap-2">
-          <FileText className="text-blue-500 w-6 h-6" />
-          Campaign Briefing
-        </label>
-        
-        <textarea 
-          value={briefingText}
-          onChange={(e) => setBriefingText(e.target.value)}
-          className="w-full flex-1 min-h-[16rem] p-5 bg-zinc-950/50 rounded-xl border border-zinc-800 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all outline-none resize-none text-white placeholder:text-zinc-600" 
-          placeholder="Cole aqui os detalhes da campanha, público-alvo, canais de veiculação e requisitos visuais obrigatórios..."
+    <>
+      {toast ? (
+        <ToastMessage
+          title={toast.title}
+          description={toast.description}
+          variant={toast.variant}
+          onClose={() => setToast(null)}
         />
-        
-        {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
+      ) : null}
 
-        <div className="mt-8">
-          <button 
-            onClick={handleSubmit}
+      <section className="mb-8 grid w-full grid-cols-1 items-stretch gap-4 lg:grid-cols-12">
+        <div className="h-full lg:col-span-4">
+          <UploadDropzone
+            imagePreview={imagePreview}
+            onFileSelect={handleFileSelect}
+            onClearFile={handleClearFile}
             disabled={isLoading}
-            className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 hover:bg-blue-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoading ? "Processando..." : "Analisar Criativo"}
-            {!isLoading && <Sparkles className="w-5 h-5" />}
-          </button>
+          />
         </div>
-      </div>
-    </section>
+
+        <div className="h-full lg:col-span-5">
+          <BriefingInput value={briefingText} onChange={setBriefingText} disabled={isLoading} />
+        </div>
+
+        <aside className="h-full lg:col-span-3">
+          <div className="sticky top-24 min-h-[19.5rem] rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 shadow-lg shadow-cyan-950/20">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Control Hub</p>
+
+            <button
+              onClick={handleSubmit}
+              disabled={isSubmitDisabled}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-3 text-sm font-bold text-zinc-950 transition-all hover:bg-cyan-400 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isLoading ? loadingSteps[loadingStepIndex] : "Analisar Criativo"}
+              {!isLoading ? <Sparkles className="h-4 w-4" /> : null}
+            </button>
+
+            <button
+              onClick={handleResetFlow}
+              disabled={isLoading && !result}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-950/60 px-4 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Nova Analise
+            </button>
+
+            <div className="mt-4 space-y-2 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-400">
+              <p className="flex items-center gap-2 text-zinc-300">
+                <Zap className="h-3.5 w-3.5 text-cyan-300" />
+                Interacao principal pronta acima da dobra.
+              </p>
+              <p>Briefing minimo: 20 caracteres</p>
+              <p>Imagem recomendada: ate 5MB</p>
+              {result ? (
+                <p className="font-semibold text-emerald-300">Ultimo score: {result.alinhamento.score}/100</p>
+              ) : null}
+            </div>
+
+            {isLoading ? <AnalysisLoadingState currentStepText={loadingSteps[loadingStepIndex]} /> : null}
+          </div>
+        </aside>
+      </section>
+
+      {result ? (
+        <AnalysisResultsPanel
+          result={result}
+          onStartOver={handleResetFlow}
+        />
+      ) : (
+        <section className="mb-10 rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/30 p-6 text-sm text-zinc-400">
+          A area de resultados aparecera aqui apos a analise. Os paineis foram otimizados para evitar scroll longo.
+        </section>
+      )}
+
+      <section className="mb-12 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/45 p-4">
+          <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Fluxo</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-100">Upload - Briefing - Insight</p>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/45 p-4">
+          <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Formato IA</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-100">Criterio | Impacto | Descricao</p>
+        </div>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/45 p-4">
+          <p className="text-xs uppercase tracking-[0.14em] text-zinc-500">Navegacao</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-100">Atalhos rapidos e abas compactas</p>
+        </div>
+      </section>
+    </>
   );
 }
