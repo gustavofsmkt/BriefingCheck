@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RotateCcw, Sparkles, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { triggerN8nWebhook } from "@/lib/n8n/webhook";
@@ -17,16 +17,22 @@ interface ToastState {
   variant: ToastVariant;
 }
 
+interface ReferenceImageItem {
+  id: string;
+  file: File;
+  previewUrl: string;
+}
+
 export function AnalysisForm() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
-  const [referenceImagePreview, setReferenceImagePreview] = useState<string | null>(null);
+  const [referenceImages, setReferenceImages] = useState<ReferenceImageItem[]>([]);
   const [briefingText, setBriefingText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loadingStepIndex, setLoadingStepIndex] = useState(0);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const referenceImagesRef = useRef<ReferenceImageItem[]>([]);
 
   const isSubmitDisabled = isLoading || !imageFile || briefingText.trim().length < 20;
 
@@ -63,16 +69,20 @@ export function AnalysisForm() {
   }, [toast]);
 
   useEffect(() => {
+    referenceImagesRef.current = referenceImages;
+  }, [referenceImages]);
+
+  useEffect(() => {
     return () => {
       if (imagePreview) {
         URL.revokeObjectURL(imagePreview);
       }
 
-      if (referenceImagePreview) {
-        URL.revokeObjectURL(referenceImagePreview);
-      }
+      referenceImagesRef.current.forEach((item) => {
+        URL.revokeObjectURL(item.previewUrl);
+      });
     };
-  }, [imagePreview, referenceImagePreview]);
+  }, [imagePreview]);
 
   const handleFileSelect = (file: File) => {
     setImageFile(file);
@@ -96,33 +106,47 @@ export function AnalysisForm() {
     setImagePreview(null);
   };
 
-  const handleReferenceFileSelect = (file: File) => {
-    setReferenceImageFile(file);
-    setResult(null);
-    setToast(null);
-
-    if (referenceImagePreview) {
-      URL.revokeObjectURL(referenceImagePreview);
+  const handleReferenceFilesSelect = (files: File[]) => {
+    if (files.length === 0) {
+      return;
     }
 
-    setReferenceImagePreview(URL.createObjectURL(file));
+    const newItems: ReferenceImageItem[] = files.map((file, index) => ({
+      id: `${Date.now()}-${index}-${file.name}`,
+      file,
+      previewUrl: URL.createObjectURL(file),
+    }));
+
+    setReferenceImages((prev) => [...prev, ...newItems]);
+    setResult(null);
+    setToast(null);
   };
 
   const handleReferenceInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      handleReferenceFileSelect(file);
-    }
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    handleReferenceFilesSelect(files);
+    e.target.value = "";
   };
 
-  const handleClearReferenceFile = () => {
-    setReferenceImageFile(null);
+  const handleRemoveReferenceImage = (id: string) => {
+    setReferenceImages((prev) => {
+      const target = prev.find((item) => item.id === id);
+      if (target) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
 
-    if (referenceImagePreview) {
-      URL.revokeObjectURL(referenceImagePreview);
-    }
+      return prev.filter((item) => item.id !== id);
+    });
+  };
 
-    setReferenceImagePreview(null);
+  const handleClearReferenceFiles = () => {
+    setReferenceImages((prev) => {
+      prev.forEach((item) => {
+        URL.revokeObjectURL(item.previewUrl);
+      });
+
+      return [];
+    });
   };
 
   const handleResetFlow = () => {
@@ -130,7 +154,7 @@ export function AnalysisForm() {
     setToast(null);
     setBriefingText("");
     handleClearFile();
-    handleClearReferenceFile();
+    handleClearReferenceFiles();
   };
 
   const showErrorToast = (description: string) => {
@@ -177,13 +201,13 @@ export function AnalysisForm() {
         .from('creatives')
         .getPublicUrl(uploadData.path);
 
-      let referenceImageUrl: string | undefined;
+      const referenceImageUrls: string[] = [];
 
-      if (referenceImageFile) {
-        const referenceFileName = `ref-${Date.now()}-${referenceImageFile.name}`;
+      for (const referenceImage of referenceImages) {
+        const referenceFileName = `ref-${Date.now()}-${referenceImage.file.name}`;
         const { data: referenceUploadData, error: referenceUploadError } = await supabase.storage
           .from('creatives')
-          .upload(referenceFileName, referenceImageFile);
+          .upload(referenceFileName, referenceImage.file);
 
         if (referenceUploadError) {
           throw referenceUploadError;
@@ -193,8 +217,10 @@ export function AnalysisForm() {
           .from('creatives')
           .getPublicUrl(referenceUploadData.path);
 
-        referenceImageUrl = referencePublicUrl;
+        referenceImageUrls.push(referencePublicUrl);
       }
+
+      const primaryReferenceImageUrl = referenceImageUrls[0];
 
       const createAnalysisLegacy = async () => {
         return supabase
@@ -213,7 +239,7 @@ export function AnalysisForm() {
         .from('analyses')
         .insert([{ 
           image_url: publicUrl,
-          reference_image_url: referenceImageUrl ?? null,
+          reference_image_url: primaryReferenceImageUrl ?? null,
           briefing_text: briefingText,
           status: 'pending'
         }])
@@ -247,7 +273,8 @@ export function AnalysisForm() {
         id: analysisData.id,
         image_url: publicUrl,
         briefing_text: briefingText,
-        reference_image_url: referenceImageUrl,
+        reference_image_url: primaryReferenceImageUrl,
+        reference_image_urls: referenceImageUrls.length > 0 ? referenceImageUrls : undefined,
       });
 
       const pollInterval = setInterval(async () => {
@@ -312,33 +339,42 @@ export function AnalysisForm() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Referencia visual</p>
-                <p className="mt-1 text-xs text-zinc-400">Opcional. Use apenas se quiser contextualizar melhor o briefing.</p>
+                <p className="mt-1 text-xs text-zinc-400">Opcional. Adicione uma ou mais imagens para contextualizar melhor.</p>
               </div>
 
-              {referenceImageFile ? (
+              {referenceImages.length > 0 ? (
                 <button
                   type="button"
-                  onClick={handleClearReferenceFile}
+                  onClick={handleClearReferenceFiles}
                   disabled={isLoading}
                   className="rounded-lg border border-zinc-700 px-2.5 py-1 text-[11px] font-semibold text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Remover
+                  Limpar ({referenceImages.length})
                 </button>
               ) : null}
             </div>
 
-            {referenceImagePreview ? (
-              <div className="mt-3 flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/70 p-2.5">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={referenceImagePreview}
-                  alt="Preview da referencia visual"
-                  className="h-12 w-12 rounded-md object-cover"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium text-zinc-200">{referenceImageFile?.name}</p>
-                  <p className="text-[11px] text-zinc-500">Referencia pronta para envio</p>
-                </div>
+            {referenceImages.length > 0 ? (
+              <div className="mt-3 max-h-40 space-y-2 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950/70 p-2.5">
+                {referenceImages.map((item) => (
+                  <div key={item.id} className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/70 p-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={item.previewUrl}
+                      alt={`Preview da referencia ${item.file.name}`}
+                      className="h-10 w-10 rounded object-cover"
+                    />
+                    <p className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-200">{item.file.name}</p>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveReferenceImage(item.id)}
+                      disabled={isLoading}
+                      className="rounded border border-zinc-700 px-2 py-1 text-[10px] font-semibold text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                ))}
               </div>
             ) : null}
 
@@ -346,12 +382,13 @@ export function AnalysisForm() {
               htmlFor="reference-image-upload-inline"
               className="mt-3 inline-flex cursor-pointer items-center rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-200 transition-colors hover:border-zinc-600 hover:text-white"
             >
-              {referenceImageFile ? "Trocar referencia" : "Adicionar referencia"}
+              {referenceImages.length > 0 ? "Adicionar mais referencias" : "Adicionar referencias"}
             </label>
             <input
               id="reference-image-upload-inline"
               type="file"
               accept="image/png, image/jpeg"
+              multiple
               onChange={handleReferenceInputChange}
               disabled={isLoading}
               className="hidden"
