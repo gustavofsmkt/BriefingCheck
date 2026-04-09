@@ -294,8 +294,8 @@ export function AnalysisForm() {
         />
       ) : null}
 
-      <section className="mb-8 grid w-full grid-cols-1 items-stretch gap-4 lg:grid-cols-12">
-        <div className="h-full lg:col-span-4">
+      <section className="mb-8 grid w-full grid-cols-1 items-start gap-4 lg:grid-cols-12">
+        <div className="lg:col-span-4">
           <UploadDropzone
             imagePreview={imagePreview}
             onFileSelect={handleFileSelect}
@@ -359,11 +359,11 @@ export function AnalysisForm() {
           </div>
         </div>
 
-        <div className="h-full lg:col-span-5">
+        <div className="lg:col-span-5">
           <BriefingInput value={briefingText} onChange={setBriefingText} disabled={isLoading} />
         </div>
 
-        <aside className="h-full lg:col-span-3">
+        <aside className="lg:col-span-3">
           <div className="sticky top-24 min-h-[19.5rem] rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 shadow-lg shadow-cyan-950/20">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Control Hub</p>
 
