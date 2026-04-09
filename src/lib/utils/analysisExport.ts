@@ -37,8 +37,19 @@ function clipText(value: string, size: number) {
   return `${value.slice(0, size - 3)}...`;
 }
 
+function toPdfSafeText(value: string) {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function parseStructuredItem(item: string) {
-  const parts = item.split("|").map((part) => part.trim());
+  const safeItem = toPdfSafeText(item);
+  const parts = safeItem.split("|").map((part) => part.trim());
 
   if (parts.length < 3) {
     return {
@@ -155,7 +166,14 @@ export function downloadAnalysisAsPdf(result: AnalysisResult, options: PdfExport
   const executiveSummary = buildExecutiveSummary(result);
   let cursorY = 0;
 
-  const toLines = (text: string, maxWidth: number) => doc.splitTextToSize(text, maxWidth) as string[];
+  const toLines = (text: string, maxWidth: number) => {
+    const safeText = toPdfSafeText(text);
+    if (!safeText) {
+      return ["-"];
+    }
+
+    return doc.splitTextToSize(safeText, maxWidth) as string[];
+  };
 
   const ensurePageSpace = (requiredHeight: number) => {
     if (cursorY + requiredHeight <= pageHeight - margin) {
@@ -164,7 +182,11 @@ export function downloadAnalysisAsPdf(result: AnalysisResult, options: PdfExport
 
     doc.addPage();
     drawPageBackground();
-    cursorY = margin;
+    doc.setTextColor(100, 116, 139);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("CONTINUACAO DO RELATORIO", margin, margin + 12);
+    cursorY = margin + 24;
   };
 
   const drawPageBackground = () => {
@@ -206,23 +228,31 @@ export function downloadAnalysisAsPdf(result: AnalysisResult, options: PdfExport
     doc.text("de Criativo", margin + 24, margin + 139);
 
     const metadataY = margin + 172;
+    const metadataLabelX = margin + 40;
+    const metadataValueX = margin + 180;
+    const metadataValueWidth = contentWidth - (metadataValueX - margin) - 40;
+    const campaignLines = toLines(campaignName, metadataValueWidth).slice(0, 2);
+    const dateLine = formatDate(generatedAt);
+    const scoreLine = `${result.alinhamento.label} (${result.alinhamento.score}/100)`;
+    const metadataHeight = 124;
+
     doc.setFillColor(10, 17, 36);
-    doc.roundedRect(margin + 24, metadataY, contentWidth - 48, 110, 14, 14, "F");
+    doc.roundedRect(margin + 24, metadataY, contentWidth - 48, metadataHeight, 14, 14, "F");
     doc.setDrawColor(39, 52, 72);
-    doc.roundedRect(margin + 24, metadataY, contentWidth - 48, 110, 14, 14, "S");
+    doc.roundedRect(margin + 24, metadataY, contentWidth - 48, metadataHeight, 14, 14, "S");
 
     doc.setTextColor(148, 163, 184);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text("DATA DO RELATORIO", margin + 40, metadataY + 26);
-    doc.text("CAMPANHA", margin + 40, metadataY + 58);
-    doc.text("ALINHAMENTO", margin + 40, metadataY + 90);
+    doc.text("DATA DO RELATORIO", metadataLabelX, metadataY + 26);
+    doc.text("CAMPANHA", metadataLabelX, metadataY + 62);
+    doc.text("ALINHAMENTO", metadataLabelX, metadataY + 102);
 
     doc.setTextColor(241, 245, 249);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
-    doc.text(formatDate(generatedAt), margin + 180, metadataY + 26);
-    doc.text(clipText(campaignName, 52), margin + 180, metadataY + 58);
+    doc.text(dateLine, metadataValueX, metadataY + 26);
+    doc.text(campaignLines, metadataValueX, metadataY + 62);
 
     const scoreColor =
       result.alinhamento.label === "Bom"
@@ -232,28 +262,43 @@ export function downloadAnalysisAsPdf(result: AnalysisResult, options: PdfExport
           : [248, 113, 113];
 
     doc.setTextColor(scoreColor[0], scoreColor[1], scoreColor[2]);
-    doc.text(`${result.alinhamento.label} (${result.alinhamento.score}/100)`, margin + 180, metadataY + 90);
+    doc.text(scoreLine, metadataValueX, metadataY + 102);
 
-    const summaryY = metadataY + 134;
+    const summaryY = metadataY + metadataHeight + 24;
     doc.setTextColor(34, 211, 238);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.text("RESUMO EXECUTIVO", margin + 24, summaryY);
 
+    const summaryLines = toLines(executiveSummary, contentWidth - 72).slice(0, 7);
+    const summaryBoxHeight = Math.max(84, summaryLines.length * 15 + 30);
+    doc.setFillColor(10, 17, 36);
+    doc.roundedRect(margin + 24, summaryY + 12, contentWidth - 48, summaryBoxHeight, 12, 12, "F");
+    doc.setDrawColor(39, 52, 72);
+    doc.roundedRect(margin + 24, summaryY + 12, contentWidth - 48, summaryBoxHeight, 12, 12, "S");
+
     doc.setTextColor(203, 213, 225);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
-    const summaryLines = toLines(executiveSummary, contentWidth - 48);
-    doc.text(summaryLines, margin + 24, summaryY + 22);
+    doc.text(summaryLines, margin + 36, summaryY + 36);
+
+    const snapshotY = summaryY + 12 + summaryBoxHeight + 24;
+    const briefingLines = toLines(briefingSnapshot, contentWidth - 72).slice(0, 5);
+    const snapshotBoxHeight = Math.max(72, briefingLines.length * 14 + 30);
 
     doc.setTextColor(148, 163, 184);
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
-    doc.text("Snapshot do briefing", margin + 24, summaryY + 82);
+    doc.text("SNAPSHOT DO BRIEFING", margin + 24, snapshotY);
+
+    doc.setFillColor(10, 17, 36);
+    doc.roundedRect(margin + 24, snapshotY + 10, contentWidth - 48, snapshotBoxHeight, 12, 12, "F");
+    doc.setDrawColor(39, 52, 72);
+    doc.roundedRect(margin + 24, snapshotY + 10, contentWidth - 48, snapshotBoxHeight, 12, 12, "S");
 
     doc.setTextColor(226, 232, 240);
-    const briefingLines = toLines(briefingSnapshot, contentWidth - 48);
-    doc.text(briefingLines, margin + 24, summaryY + 99);
+    doc.setFontSize(10);
+    doc.text(briefingLines, margin + 36, snapshotY + 31);
 
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(9);
