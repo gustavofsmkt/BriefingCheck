@@ -108,6 +108,13 @@ export function AnalysisForm() {
     setReferenceImagePreview(URL.createObjectURL(file));
   };
 
+  const handleReferenceInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleReferenceFileSelect(file);
+    }
+  };
+
   const handleClearReferenceFile = () => {
     setReferenceImageFile(null);
 
@@ -150,16 +157,6 @@ export function AnalysisForm() {
 
     if (briefingText.trim().length < 20) {
       showErrorToast("O briefing precisa ter pelo menos 20 caracteres para uma analise confiavel.");
-      return;
-    }
-
-    if (imageFile.size > 5 * 1024 * 1024) {
-      showErrorToast("A imagem ultrapassa 5MB. Use um arquivo menor para continuar.");
-      return;
-    }
-
-    if (referenceImageFile && referenceImageFile.size > 5 * 1024 * 1024) {
-      showErrorToast("A imagem de referencia ultrapassa 5MB. Use um arquivo menor para continuar.");
       return;
     }
 
@@ -298,7 +295,7 @@ export function AnalysisForm() {
       ) : null}
 
       <section className="mb-8 grid w-full grid-cols-1 items-stretch gap-4 lg:grid-cols-12">
-        <div className="h-full lg:col-span-3">
+        <div className="h-full lg:col-span-4">
           <UploadDropzone
             imagePreview={imagePreview}
             onFileSelect={handleFileSelect}
@@ -310,23 +307,59 @@ export function AnalysisForm() {
             helperText="Selecionar criativo"
             previewAlt="Preview do criativo principal"
           />
+
+          <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/35 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-zinc-500">Referencia visual</p>
+                <p className="mt-1 text-xs text-zinc-400">Opcional. Use apenas se quiser contextualizar melhor o briefing.</p>
+              </div>
+
+              {referenceImageFile ? (
+                <button
+                  type="button"
+                  onClick={handleClearReferenceFile}
+                  disabled={isLoading}
+                  className="rounded-lg border border-zinc-700 px-2.5 py-1 text-[11px] font-semibold text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Remover
+                </button>
+              ) : null}
+            </div>
+
+            {referenceImagePreview ? (
+              <div className="mt-3 flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/70 p-2.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={referenceImagePreview}
+                  alt="Preview da referencia visual"
+                  className="h-12 w-12 rounded-md object-cover"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-medium text-zinc-200">{referenceImageFile?.name}</p>
+                  <p className="text-[11px] text-zinc-500">Referencia pronta para envio</p>
+                </div>
+              </div>
+            ) : null}
+
+            <label
+              htmlFor="reference-image-upload-inline"
+              className="mt-3 inline-flex cursor-pointer items-center rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-200 transition-colors hover:border-zinc-600 hover:text-white"
+            >
+              {referenceImageFile ? "Trocar referencia" : "Adicionar referencia"}
+            </label>
+            <input
+              id="reference-image-upload-inline"
+              type="file"
+              accept="image/png, image/jpeg"
+              onChange={handleReferenceInputChange}
+              disabled={isLoading}
+              className="hidden"
+            />
+          </div>
         </div>
 
-        <div className="h-full lg:col-span-3">
-          <UploadDropzone
-            imagePreview={referenceImagePreview}
-            onFileSelect={handleReferenceFileSelect}
-            onClearFile={handleClearReferenceFile}
-            disabled={isLoading}
-            inputId="reference-image-upload"
-            title="Referencia visual (opcional)"
-            description="Adicione uma segunda imagem para contextualizar"
-            helperText="Selecionar referencia"
-            previewAlt="Preview da referencia visual"
-          />
-        </div>
-
-        <div className="h-full lg:col-span-3">
+        <div className="h-full lg:col-span-5">
           <BriefingInput value={briefingText} onChange={setBriefingText} disabled={isLoading} />
         </div>
 
@@ -358,7 +391,7 @@ export function AnalysisForm() {
                 Interacao principal pronta acima da dobra.
               </p>
               <p>Briefing minimo: 20 caracteres</p>
-              <p>Imagem recomendada: ate 5MB</p>
+              <p>Imagens sem limite rigido de tamanho</p>
               {result ? (
                 <p className="font-semibold text-emerald-300">Ultimo score: {result.alinhamento.score}/100</p>
               ) : null}
