@@ -26,6 +26,7 @@ type ResultType = "positive" | "warning" | "missing";
 
 interface AnalysisResultsPanelProps {
   result: AnalysisResult;
+  briefingText?: string;
   onStartOver?: () => void;
 }
 
@@ -157,7 +158,7 @@ function ResultSection({ title, data, type, icon: Icon }: ResultSectionProps) {
   );
 }
 
-export function AnalysisResultsPanel({ result, onStartOver }: AnalysisResultsPanelProps) {
+export function AnalysisResultsPanel({ result, briefingText, onStartOver }: AnalysisResultsPanelProps) {
   const sections = useMemo(
     () => [
       { id: "positivos", title: "Pontos Positivos", type: "positive" as const, icon: CheckCircle2, data: result.pontos_positivos },
@@ -204,7 +205,15 @@ export function AnalysisResultsPanel({ result, onStartOver }: AnalysisResultsPan
         return;
       }
 
-      downloadAnalysisAsPdf(result);
+      const derivedCampaignName = briefingText
+        ? briefingText.split("\n").map((line) => line.trim()).find((line) => line.length > 0)
+        : undefined;
+
+      downloadAnalysisAsPdf(result, {
+        briefingText,
+        campaignName: derivedCampaignName,
+        generatedAt: new Date(),
+      });
     } finally {
       setIsDownloading(false);
     }

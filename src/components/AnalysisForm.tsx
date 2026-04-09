@@ -405,6 +405,7 @@ export function AnalysisForm() {
       {result ? (
         <AnalysisResultsPanel
           result={result}
+          briefingText={briefingText}
           onStartOver={handleResetFlow}
         />
       ) : (
