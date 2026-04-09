@@ -3,6 +3,7 @@ export interface Briefing {
   user_id: string;
   text: string;
   image_url: string;
+  reference_image_url?: string | null;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   created_at: string;
 }

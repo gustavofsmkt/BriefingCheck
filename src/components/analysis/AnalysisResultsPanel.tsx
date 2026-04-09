@@ -7,14 +7,20 @@ import {
   ArrowRight,
   ArrowUp,
   CheckCircle2,
+  Download,
   Dot,
   Info,
   ListPlus,
   RotateCcw,
   Sparkles,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { AnalysisResult } from "@/types";
+import {
+  downloadAnalysisAsJson,
+  downloadAnalysisAsPdf,
+  downloadAnalysisAsTxt,
+} from "@/lib/utils/analysisExport";
 
 type ResultType = "positive" | "warning" | "missing";
 
@@ -162,7 +168,47 @@ export function AnalysisResultsPanel({ result, onStartOver }: AnalysisResultsPan
   );
 
   const [activeTab, setActiveTab] = useState<ResultType>("positive");
+  const [isDownloadMenuOpen, setIsDownloadMenuOpen] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const downloadMenuRef = useRef<HTMLDivElement | null>(null);
   const activeSection = sections.find((section) => section.type === activeTab) ?? sections[0];
+
+  useEffect(() => {
+    if (!isDownloadMenuOpen) {
+      return;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (downloadMenuRef.current && !downloadMenuRef.current.contains(target)) {
+        setIsDownloadMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("click", handleClickOutside);
+    return () => window.removeEventListener("click", handleClickOutside);
+  }, [isDownloadMenuOpen]);
+
+  const handleDownload = async (format: "txt" | "json" | "pdf") => {
+    setIsDownloading(true);
+    setIsDownloadMenuOpen(false);
+
+    try {
+      if (format === "txt") {
+        downloadAnalysisAsTxt(result);
+        return;
+      }
+
+      if (format === "json") {
+        downloadAnalysisAsJson(result);
+        return;
+      }
+
+      downloadAnalysisAsPdf(result);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   const tabStyle = {
     positive: "border-emerald-500/45 bg-emerald-500/18 text-emerald-200",
@@ -206,6 +252,53 @@ export function AnalysisResultsPanel({ result, onStartOver }: AnalysisResultsPan
               Reanalisar
             </button>
           ) : null}
+
+          <div className="relative" ref={downloadMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIsDownloadMenuOpen((prev) => !prev)}
+              disabled={isDownloading}
+              aria-label="Baixar analise"
+              aria-haspopup="menu"
+              aria-expanded={isDownloadMenuOpen}
+              className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-300 transition-colors hover:border-zinc-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {isDownloading ? "Preparando..." : "Baixar analise"}
+            </button>
+
+            {isDownloadMenuOpen ? (
+              <div
+                role="menu"
+                className="absolute right-0 z-30 mt-2 min-w-44 rounded-xl border border-zinc-700 bg-zinc-950/95 p-1 shadow-xl"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleDownload("txt")}
+                  className="w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-200 transition-colors hover:bg-zinc-800"
+                >
+                  Download TXT
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleDownload("json")}
+                  className="mt-1 w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-200 transition-colors hover:bg-zinc-800"
+                >
+                  Download JSON
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleDownload("pdf")}
+                  className="mt-1 w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-zinc-200 transition-colors hover:bg-zinc-800"
+                >
+                  Download PDF
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">

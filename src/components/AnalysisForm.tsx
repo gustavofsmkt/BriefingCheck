@@ -20,6 +20,8 @@ interface ToastState {
 export function AnalysisForm() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
+  const [referenceImagePreview, setReferenceImagePreview] = useState<string | null>(null);
   const [briefingText, setBriefingText] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
@@ -65,8 +67,12 @@ export function AnalysisForm() {
       if (imagePreview) {
         URL.revokeObjectURL(imagePreview);
       }
+
+      if (referenceImagePreview) {
+        URL.revokeObjectURL(referenceImagePreview);
+      }
     };
-  }, [imagePreview]);
+  }, [imagePreview, referenceImagePreview]);
 
   const handleFileSelect = (file: File) => {
     setImageFile(file);
@@ -90,11 +96,34 @@ export function AnalysisForm() {
     setImagePreview(null);
   };
 
+  const handleReferenceFileSelect = (file: File) => {
+    setReferenceImageFile(file);
+    setResult(null);
+    setToast(null);
+
+    if (referenceImagePreview) {
+      URL.revokeObjectURL(referenceImagePreview);
+    }
+
+    setReferenceImagePreview(URL.createObjectURL(file));
+  };
+
+  const handleClearReferenceFile = () => {
+    setReferenceImageFile(null);
+
+    if (referenceImagePreview) {
+      URL.revokeObjectURL(referenceImagePreview);
+    }
+
+    setReferenceImagePreview(null);
+  };
+
   const handleResetFlow = () => {
     setResult(null);
     setToast(null);
     setBriefingText("");
     handleClearFile();
+    handleClearReferenceFile();
   };
 
   const showErrorToast = (description: string) => {
@@ -129,6 +158,11 @@ export function AnalysisForm() {
       return;
     }
 
+    if (referenceImageFile && referenceImageFile.size > 5 * 1024 * 1024) {
+      showErrorToast("A imagem de referencia ultrapassa 5MB. Use um arquivo menor para continuar.");
+      return;
+    }
+
     try {
       setIsLoading(true);
       setToast(null);
@@ -146,26 +180,77 @@ export function AnalysisForm() {
         .from('creatives')
         .getPublicUrl(uploadData.path);
 
-      // Fazer um INSERT na tabela analyses do Supabase
-      const { data: analysisData, error: dbError } = await supabase
+      let referenceImageUrl: string | undefined;
+
+      if (referenceImageFile) {
+        const referenceFileName = `ref-${Date.now()}-${referenceImageFile.name}`;
+        const { data: referenceUploadData, error: referenceUploadError } = await supabase.storage
+          .from('creatives')
+          .upload(referenceFileName, referenceImageFile);
+
+        if (referenceUploadError) {
+          throw referenceUploadError;
+        }
+
+        const { data: { publicUrl: referencePublicUrl } } = supabase.storage
+          .from('creatives')
+          .getPublicUrl(referenceUploadData.path);
+
+        referenceImageUrl = referencePublicUrl;
+      }
+
+      const createAnalysisLegacy = async () => {
+        return supabase
+          .from('analyses')
+          .insert([{ 
+            image_url: publicUrl,
+            briefing_text: briefingText,
+            status: 'pending'
+          }])
+          .select('id')
+          .single();
+      };
+
+      // Insert com fallback para schema legado sem reference_image_url.
+      let { data: analysisData, error: dbError } = await supabase
         .from('analyses')
         .insert([{ 
-          image_url: publicUrl, 
-          briefing_text: briefingText, 
-          status: 'pending' 
+          image_url: publicUrl,
+          reference_image_url: referenceImageUrl ?? null,
+          briefing_text: briefingText,
+          status: 'pending'
         }])
         .select('id')
         .single();
+
+      const shouldRetryLegacyInsert =
+        !!dbError &&
+        (
+          dbError.code === "PGRST204" ||
+          dbError.code === "42703" ||
+          dbError.message.toLowerCase().includes("reference_image_url")
+        );
+
+      if (shouldRetryLegacyInsert) {
+        const legacyInsert = await createAnalysisLegacy();
+        analysisData = legacyInsert.data;
+        dbError = legacyInsert.error;
+      }
 
       if (dbError) {
         console.error("Insert error:", dbError);
         throw dbError;
       }
 
+      if (!analysisData?.id) {
+        throw new Error("Nao foi possivel obter o identificador da analise criada.");
+      }
+
       await triggerN8nWebhook({
         id: analysisData.id,
         image_url: publicUrl,
         briefing_text: briefingText,
+        reference_image_url: referenceImageUrl,
       });
 
       const pollInterval = setInterval(async () => {
@@ -213,16 +298,35 @@ export function AnalysisForm() {
       ) : null}
 
       <section className="mb-8 grid w-full grid-cols-1 items-stretch gap-4 lg:grid-cols-12">
-        <div className="h-full lg:col-span-4">
+        <div className="h-full lg:col-span-3">
           <UploadDropzone
             imagePreview={imagePreview}
             onFileSelect={handleFileSelect}
             onClearFile={handleClearFile}
             disabled={isLoading}
+            inputId="main-image-upload"
+            title="Criativo principal"
+            description="Arraste a imagem principal para analise"
+            helperText="Selecionar criativo"
+            previewAlt="Preview do criativo principal"
           />
         </div>
 
-        <div className="h-full lg:col-span-5">
+        <div className="h-full lg:col-span-3">
+          <UploadDropzone
+            imagePreview={referenceImagePreview}
+            onFileSelect={handleReferenceFileSelect}
+            onClearFile={handleClearReferenceFile}
+            disabled={isLoading}
+            inputId="reference-image-upload"
+            title="Referencia visual (opcional)"
+            description="Adicione uma segunda imagem para contextualizar"
+            helperText="Selecionar referencia"
+            previewAlt="Preview da referencia visual"
+          />
+        </div>
+
+        <div className="h-full lg:col-span-3">
           <BriefingInput value={briefingText} onChange={setBriefingText} disabled={isLoading} />
         </div>
 

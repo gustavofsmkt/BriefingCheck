@@ -2,6 +2,7 @@ export async function triggerN8nWebhook(payload: {
   id: string;
   image_url: string;
   briefing_text: string;
+  reference_image_url?: string;
 }) {
   const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL;
 

@@ -6,6 +6,11 @@ interface UploadDropzoneProps {
   onFileSelect: (file: File) => void;
   onClearFile: () => void;
   disabled?: boolean;
+  inputId?: string;
+  title?: string;
+  description?: string;
+  helperText?: string;
+  previewAlt?: string;
 }
 
 export function UploadDropzone({
@@ -13,6 +18,11 @@ export function UploadDropzone({
   onFileSelect,
   onClearFile,
   disabled = false,
+  inputId = "image-upload",
+  title = "Arraste sua imagem aqui",
+  description = "Suporte para PNG e JPG",
+  helperText = "Procurar arquivo",
+  previewAlt = "Preview da imagem selecionada",
 }: UploadDropzoneProps) {
   const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
     e.preventDefault();
@@ -37,13 +47,13 @@ export function UploadDropzone({
   return (
     <div className="h-full rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4 shadow-sm transition-shadow md:p-5">
       <label
-        htmlFor="image-upload"
+        htmlFor={inputId}
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
         className="group relative flex h-full min-h-[19.5rem] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-zinc-700 bg-zinc-950/50 p-6 outline-none transition-colors hover:bg-zinc-800/40 focus-visible:ring-2 focus-visible:ring-cyan-400"
       >
         <input
-          id="image-upload"
+          id={inputId}
           type="file"
           accept="image/png, image/jpeg"
           className="hidden"
@@ -55,7 +65,7 @@ export function UploadDropzone({
           <>
             <Image
               src={imagePreview}
-              alt="Preview do criativo"
+              alt={previewAlt}
               fill
               sizes="(max-width: 1024px) 100vw, 40vw"
               unoptimized
@@ -79,11 +89,11 @@ export function UploadDropzone({
               <Upload className="h-7 w-7 text-cyan-400" />
             </div>
             <p className="mb-1 text-center text-sm font-semibold text-white md:text-base">
-              Arraste sua imagem aqui
+              {title}
             </p>
-            <p className="mb-4 text-center text-xs text-zinc-500 md:text-sm">Suporte para PNG e JPG</p>
+            <p className="mb-4 text-center text-xs text-zinc-500 md:text-sm">{description}</p>
             <span className="rounded-lg bg-zinc-800 px-5 py-2 text-sm font-medium text-white transition-colors group-hover:bg-zinc-700">
-              Procurar arquivo
+              {helperText}
             </span>
           </>
         )}
